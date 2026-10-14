@@ -1,7 +1,30 @@
 components:
   terraform:
-    example/basic:
+    codeartifact/basic:
       metadata:
         component: target
       vars:
         enabled: true
+        name: codeartifact
+        # domain_name is set by the test with a random suffix, so that parallel
+        # Terraform and OpenTofu runs do not collide in the same account.
+        repositories:
+          pypi-store:
+            description: "Cache of public PyPI"
+            external_connection: "public:pypi"
+          python:
+            description: "First-party Python packages"
+            upstreams:
+              - pypi-store
+        repository_endpoint_formats:
+          - pypi
+        package_groups:
+          first-party:
+            pattern: "/pypi//example~"
+            description: "First-party Python packages"
+            publish:
+              restriction_mode: ALLOW
+            external_upstream:
+              restriction_mode: BLOCK
+            internal_upstream:
+              restriction_mode: BLOCK

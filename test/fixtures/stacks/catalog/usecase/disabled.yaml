@@ -1,7 +1,17 @@
 components:
   terraform:
-    example/disabled:
+    codeartifact/disabled:
       metadata:
         component: target
       vars:
         enabled: false
+        name: codeartifact
+        repositories:
+          pypi-store:
+            external_connection: "public:pypi"
+          python:
+            upstreams:
+              - pypi-store
+        package_groups:
+          first-party:
+            pattern: "/pypi//example~"
