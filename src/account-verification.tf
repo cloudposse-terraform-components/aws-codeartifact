@@ -42,30 +42,38 @@ locals {
   # Current AWS account ID from the active credentials (via Atmos Auth or AWS provider)
   current_account_id = data.aws_caller_identity.account_verification.account_id
 
-  # Determine if validation should be performed based on four conditions:
+  # Determine if validation should be performed based on three conditions:
   # 1. account_map_enabled is false, i.e. Atmos Auth supplies the credentials
   # 2. account_map.full_account_map is provided and not empty
   # 3. Expected account name can be constructed from tenant and stage
-  # 4. Expected account ID exists in the account_map for the constructed account name
+  #
+  # A missing entry for the expected account name does NOT skip validation. A populated
+  # map without this account is treated as a configuration error and fails the plan,
+  # so that a typo in the map cannot silently disable the check.
   should_validate = (
     !var.account_map_enabled &&
     length(var.account_map.full_account_map) > 0 &&
-    local.expected_account_name != null &&
-    local.expected_account_id != null
+    local.expected_account_name != null
   )
 
-  # Error message for account mismatch.
+  # Error message for a missing account map entry or an account mismatch.
   # Must always return a string (never null) for use in precondition error_message.
-  validation_error = local.should_validate && local.current_account_id != local.expected_account_id ? (
-    "Account verification failed: Expected account ID ${local.expected_account_id} for account '${local.expected_account_name}' (tenant: ${var.tenant}, stage: ${var.stage}), but current account ID is ${local.current_account_id}"
-  ) : "Account verification check passed"
+  validation_error = !local.should_validate ? "Account verification skipped" : (
+    local.expected_account_id == null ? (
+      "Account verification failed: account '${local.expected_account_name}' (tenant: ${var.tenant}, stage: ${var.stage}) is not in account_map.full_account_map"
+      ) : (
+      local.current_account_id != local.expected_account_id ? (
+        "Account verification failed: Expected account ID ${local.expected_account_id} for account '${local.expected_account_name}' (tenant: ${var.tenant}, stage: ${var.stage}), but current account ID is ${local.current_account_id}"
+      ) : "Account verification check passed"
+    )
+  )
 }
 
 # Perform account verification using terraform_data resource with lifecycle precondition.
 # This resource is only created when validation should be performed (should_validate = true).
 #
-# The precondition ensures that the current account ID matches the expected account ID,
-# failing the Terraform run with a descriptive error if there's a mismatch.
+# The precondition fails the Terraform run with a descriptive error if the expected account
+# is missing from the account map, or if the current account ID does not match it.
 #
 # Note: terraform_data is available in Terraform 1.4+. For earlier versions, this still works
 # but validation happens at plan time rather than during the lifecycle check.
@@ -74,7 +82,7 @@ resource "terraform_data" "account_verification" {
 
   lifecycle {
     precondition {
-      condition     = local.current_account_id == local.expected_account_id
+      condition     = local.expected_account_id != null && local.current_account_id == local.expected_account_id
       error_message = local.validation_error
     }
   }
