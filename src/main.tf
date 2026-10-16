@@ -1,6 +1,6 @@
 module "codeartifact" {
   source  = "cloudposse/codeartifact/aws"
-  version = "0.0.1"
+  version = "0.1.0"
 
   create_domain      = var.create_domain
   domain_name        = var.domain_name
@@ -21,7 +21,7 @@ module "codeartifact" {
 
 module "package_groups" {
   source  = "cloudposse/codeartifact/aws//modules/package-groups"
-  version = "0.0.1"
+  version = "0.1.0"
 
   domain_name    = module.codeartifact.domain_name
   domain_owner   = module.codeartifact.domain_owner
