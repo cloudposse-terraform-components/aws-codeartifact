@@ -1,28 +1,101 @@
-name: "template"
+name: "aws-codeartifact"
 
 # Canonical GitHub repo
-github_repo: "cloudposse-terraform-components/template"
+github_repo: "cloudposse-terraform-components/aws-codeartifact"
 
 # Short description of this project
 description: |-
-  Description of this component 55
+  This component is responsible for provisioning an AWS CodeArtifact domain, its repositories, cross-account read and
+  publish access, and package groups with origin controls. It wraps the
+  [`cloudposse/codeartifact/aws`](https://github.com/cloudposse/terraform-aws-codeartifact) module and its
+  `package-groups` submodule.
+
+  Repositories can connect to public registries (PyPI, npm, Maven Central and others) and list other repositories in the
+  same domain as upstreams, so consumers point their package manager at a single repository and resolve both private and
+  public packages through it.
+
+  Access is granted by IAM principal ARN or by AWS Organization ID. The principals receive both the domain policy (to
+  obtain an authorization token) and a permissions policy on every repository. Wire role ARNs from other components in
+  the stack configuration with `!terraform.state`.
+
+  Package groups protect first-party package names from dependency confusion: with publishing allowed and both upstream
+  restrictions set to `BLOCK`, a matching package can only come from a direct publish into the domain, never from a
+  public registry. Package groups are managed with the `hashicorp/awscc` provider, because the `hashicorp/aws` provider
+  has no resource for them.
+
+  ## Authentication
+
+  This component ships the next-gen `providers.tf`: the `aws` and `awscc` providers set only `region`, and
+  [Atmos Auth](https://atmos.tools/cli/configuration/auth) supplies the target account credentials before Terraform
+  runs. There is no dependency on `account-map`. When `account_map.full_account_map` is populated, the account
+  verification check fails the plan if the credentials belong to a different account than the stack's `tenant-stage`.
+
+  On infrastructure that still uses `account-map` and team roles, vendor the
+  `providers-account-map-bypass.depth-1.tf` mixin from
+  [cloudposse-terraform-components/mixins](https://github.com/cloudposse-terraform-components/mixins) in place of
+  `providers.tf`, and give the `awscc` provider in `provider-awscc.tf` the same `assume_role` as the `aws` provider.
+  `awscc` takes `assume_role` as an attribute, not a block:
+
+  ```hcl
+  provider "awscc" {
+    region = var.region
+
+    assume_role = var.account_map_enabled && length(compact([module.iam_roles.terraform_role_arn])) > 0 ? {
+      role_arn = module.iam_roles.terraform_role_arn
+    } : null
+  }
+  ```
 
 usage: |-
-  **Stack Level**: Regional or Global
+  **Stack Level**: Regional
 
-  Here's an example snippet for how to use this component.
+  This component is normally applied once, in the account that holds build artifacts (typically `artifacts`, `auto` or
+  `corp`), in the primary Region. The domain name is what every consumer types into its package manager configuration,
+  so keep it short and never change it: replacing a domain deletes every package stored in it.
 
   ```yaml
   components:
     terraform:
-      foo:
+      codeartifact:
         vars:
           enabled: true
+          name: codeartifact
+          domain_name: acme
+          repositories:
+            # Holds only the public connection. Nothing installs from it directly.
+            pypi-store:
+              description: "Cache of public PyPI"
+              external_connection: "public:pypi"
+            # First-party packages, with public PyPI resolved through pypi-store.
+            python:
+              description: "First-party Python packages"
+              upstreams:
+                - pypi-store
+          repository_endpoint_formats:
+            - pypi
+          package_groups:
+            # Packages named acme* can only be published here, never pulled from PyPI.
+            first-party-python:
+              pattern: "/pypi//acme~"
+              publish:
+                restriction_mode: ALLOW
+              external_upstream:
+                restriction_mode: BLOCK
+              internal_upstream:
+                restriction_mode: BLOCK
+          # Role ARNs from other components, resolved by Atmos.
+          principals_readonly_access:
+            - !terraform.state iam-role/ci-build plat-dev-use1 arn
+            - !terraform.state iam-role/ci-build plat-prod-use1 arn
+          principals_publish_access:
+            - !terraform.state iam-role/ci-publish core-auto-use1 arn
   ```
 
+  Consumers in other accounts also need an identity policy allowing `codeartifact:GetAuthorizationToken`,
+  `codeartifact:GetRepositoryEndpoint`, `codeartifact:ReadFromRepository` and `sts:GetServiceBearerToken`.
 
-
-
+  A package group pattern is validated by the API at apply time, not at plan time. A prefix match ends in `~`
+  (`/pypi//acme~`), and `*` only matches a whole segment (`/npm/@acme/*`).
 
 tags:
   - terraform
@@ -46,13 +119,22 @@ license: "APACHE2"
 # Badges to display
 badges:
   - name: "Latest Release"
-    image: "https://img.shields.io/github/release/cloudposse-terraform-components/template.svg?style=for-the-badge"
-    url: "https://github.com/cloudposse-terraform-components/template/releases/latest"
+    image: "https://img.shields.io/github/release/cloudposse-terraform-components/aws-codeartifact.svg?style=for-the-badge"
+    url: "https://github.com/cloudposse-terraform-components/aws-codeartifact/releases/latest"
   - name: "Slack Community"
     image: "https://slack.cloudposse.com/for-the-badge.svg"
     url: "https://slack.cloudposse.com"
 
 references:
+  - name: "AWS CodeArtifact"
+    description: "CodeArtifact concepts: domains, repositories, upstream repositories and external connections"
+    url: "https://docs.aws.amazon.com/codeartifact/latest/ug/welcome.html"
+  - name: "Package groups and origin controls"
+    description: "How package groups set origin controls for packages that match a pattern"
+    url: "https://docs.aws.amazon.com/codeartifact/latest/ug/package-groups.html"
+  - name: "cloudposse/terraform-aws-codeartifact"
+    description: "The Terraform module this component wraps"
+    url: "https://github.com/cloudposse/terraform-aws-codeartifact"
   - name: "Cloud Posse Documentation"
     description: "Complete documentation for the Cloud Posse solution"
     url: "https://docs.cloudposse.com"
